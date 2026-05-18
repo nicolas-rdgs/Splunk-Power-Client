@@ -1,0 +1,108 @@
+name: release
+
+on:
+  push:
+    branches: [main]
+
+# Serialize releases so two pushes can't race.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  test:
+    uses: ./.github/workflows/test.yml
+
+  release:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write       # push tag + version-bump commit
+      id-token: write       # PyPI trusted publishing (OIDC)
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Set up Python
+        run: uv python install 3.13
+
+      - name: Install dependencies
+        run: uv sync --all-extras --all-groups --frozen
+
+      - name: Configure git author
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Determine next version (dry-run)
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # `semantic-release version --print` always emits a non-empty string
+        # (current version when no bump), so we compare it to the last released
+        # version. A bump happens only when the two differ — and we explicitly
+        # skip the synthetic "0.0.0" baseline that appears when no tag exists.
+        run: |
+          NEXT=$(uv run semantic-release --noop version --print 2>/dev/null || true)
+          LAST=$(uv run semantic-release --noop version --print-last-released 2>/dev/null || true)
+          if [ -n "$NEXT" ] && [ "$NEXT" != "$LAST" ] && { [ -n "$LAST" ] || [ "$NEXT" != "0.0.0" ]; }; then
+            echo "released=true" >> "$GITHUB_OUTPUT"
+            echo "version=$NEXT" >> "$GITHUB_OUTPUT"
+          else
+            echo "No release warranted by commits since last tag. Skipping."
+            echo "released=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run semantic-release (bump, changelog, commit, tag, push)
+        if: steps.check.outputs.released == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: uv run semantic-release version --skip-build --no-vcs-release
+
+      - name: Build distribution
+        if: steps.check.outputs.released == 'true'
+        run: uv build
+
+      - name: Publish to PyPI (OIDC trusted publishing)
+        if: steps.check.outputs.released == 'true'
+        run: uv publish --trusted-publishing always
+
+      - name: Compose release notes + Contributors
+        if: steps.check.outputs.released == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.check.outputs.version }}
+        run: |
+          # Extract the latest section from CHANGELOG.md (between the first two
+          # `## v` headings).
+          awk '/^## v/{c++; if(c==2) exit} c==1' CHANGELOG.md > release_notes.md
+
+          # Append a Contributors section using unique commit authors from the
+          # GitHub API compare endpoint (logins, not raw git names).
+          PREV=$(git describe --tags --abbrev=0 "v${VERSION}^" 2>/dev/null || true)
+          if [ -n "$PREV" ]; then
+            CONTRIBUTORS=$(gh api "repos/${{ github.repository }}/compare/${PREV}...v${VERSION}" \
+              --jq '[.commits[].author.login] | unique | map(select(. != null)) | map("@" + .) | join(", ")')
+            if [ -n "$CONTRIBUTORS" ]; then
+              printf '\n## Contributors\n\nThanks to %s for contributing to this release!\n' "$CONTRIBUTORS" >> release_notes.md
+            fi
+          fi
+
+      - name: Create GitHub Release
+        if: steps.check.outputs.released == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.check.outputs.version }}
+        run: |
+          gh release create "v${VERSION}" \
+            --title "v${VERSION}" \
+            --notes-file release_notes.md \
+            dist/*
