@@ -1,0 +1,159 @@
+site_name: Splunk Power Client (SPC)
+site_description: A modern, scriptable client for Splunk
+site_url: https://nicolas-rdgs.github.io/Splunk-Power-Client/
+docs_dir: docs
+
+repo_url: https://github.com/nicolas-rdgs/Splunk-Power-Client
+repo_name: Splunk-Power-Client
+edit_uri: edit/main/docs/
+
+hooks:
+  - _mkdocs/hooks/repo_info.py
+
+nav:
+  - SPC: index.md
+  - Get started:
+      - Configure instances: configure_instances.md
+      - Global options: global_options.md
+      - Splunk URI scheme: splunk_uri_scheme.md
+  - Commands:
+      - Instances: commands/instances.md
+      - Secrets: commands/secrets.md
+      - Info: commands/info.md
+      - Lookups: commands/lookups.md
+      - Searches: commands/searches.md
+      - Jobs: commands/jobs.md
+      - Ingest: commands/ingest.md
+      - Configs: commands/configs.md
+      - Users: commands/users.md
+  - Cheatsheet: cheatsheet.md
+  - Advanced:
+      - Custom script: custom_script.md
+
+theme:
+  name: material
+  custom_dir: _mkdocs/overrides
+  font:
+    text: Inter
+    code: JetBrains Mono
+  logo: assets/img/splunk-lightning.png
+  icon:
+    repo: fontawesome/brands/github
+  palette:
+    - media: "(prefers-color-scheme)"
+      toggle:
+        icon: material/lightbulb-auto
+        name: Switch to light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: green
+      accent: blue
+      toggle:
+        icon: material/lightbulb
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: green
+      accent: teal
+      toggle:
+        icon: material/lightbulb-outline
+        name: Switch to system preference
+  features:
+    # Navigation
+    - navigation.instant
+    - navigation.instant.prefetch
+    - navigation.instant.progress
+    - navigation.tracking
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.indexes
+    - navigation.top
+    - navigation.footer
+    # Search
+    - search.suggest
+    - search.highlight
+    - search.share
+    # Content
+    - content.code.copy
+    - content.code.annotate
+    - content.tabs.link
+    - content.tooltips
+    - toc.follow
+
+plugins:
+  - search
+  # Auto-generate API docs from Python docstrings.
+  # Install: uv add --dev "mkdocstrings[python]"
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            show_source: true
+            show_root_heading: true
+            show_symbol_type_heading: true
+            show_symbol_type_toc: true
+            docstring_style: google
+            separate_signature: true
+            merge_init_into_class: true
+  # "Last updated" timestamps. Install: uv add --dev mkdocs-git-revision-date-localized-plugin
+  - git-revision-date-localized:
+      type: date
+      enable_creation_date: true
+  # Zoomable images / lightbox. Install: uv add --dev mkdocs-glightbox
+  - glightbox
+
+extra:
+  social:
+    - icon: fontawesome/brands/github-alt
+      link: https://github.com/nicolas-rdgs/Splunk-Power-Client
+  generator: false # hides "Made with Material for MkDocs" footer
+
+markdown_extensions:
+  # Python Markdown
+  - def_list
+  - abbr
+  - attr_list
+  - footnotes
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+
+  # Python Markdown Extensions
+  - pymdownx.betterem:
+      smart_enable: all
+  - pymdownx.caret
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences
+  - pymdownx.keys
+  - pymdownx.mark
+  - pymdownx.tilde
+  - pymdownx.smartsymbols
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator:
+        !!python/name:material.extensions.emoji.to_svg # pymdownx blocks
+
+
+  - pymdownx.blocks.admonition:
+      types:
+        - note
+        - attention
+        - caution
+        - danger
+        - error
+        - tip
+        - hint
+        - warning
+        # Custom types
+        - info
+        - check
+  - pymdownx.blocks.details
+  - pymdownx.blocks.tab:
+      alternate_style: true
