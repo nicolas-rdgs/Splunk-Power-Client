@@ -1,0 +1,23 @@
+<a href="{{ config.repo_url }}" title="{{ lang.t('source') }}" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    {% set icon = config.theme.icon.repo or "fontawesome/brands/git-alt" %}
+    {% include ".icons/" ~ icon ~ ".svg" %}
+  </div>
+  <div class="md-source__repository">
+    {{ config.repo_name }}
+    {% set repo = config.extra.repo %}
+    {% if repo %}
+      <ul class="md-source__facts">
+        {% if repo.version %}
+          <li class="md-source__fact md-source__fact--version">{{ repo.version }}</li>
+        {% endif %}
+        {% if repo.stars %}
+          <li class="md-source__fact md-source__fact--stars">{{ repo.stars }}</li>
+        {% endif %}
+        {% if repo.forks %}
+          <li class="md-source__fact md-source__fact--forks">{{ repo.forks }}</li>
+        {% endif %}
+      </ul>
+    {% endif %}
+  </div>
+</a>

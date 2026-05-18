@@ -1,0 +1,21 @@
+# https://taskfile.dev
+
+version: "3"
+
+tasks:
+  docs-serve:
+    desc: "Serve the documentation"
+    cmds:
+      - uv run mkdocs serve -a 0.0.0.0:4242
+    silent: true
+
+  tests:
+    desc: "Run tests"
+    cmds:
+      - uv run pytest --junitxml=report.xml --cov=
+    silent: true
+
+  lint:
+    desc: "Run lint"
+    cmds:
+      - uv run ruff check .
