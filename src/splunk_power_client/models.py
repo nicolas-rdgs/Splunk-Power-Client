@@ -1356,7 +1356,7 @@ class SplunkInstanceLookupCSV(Lookup):
             except KeyError:
                 # TODO: raise an error when the given app doesn't exists (lookups cp s://local//dummy_app)
                 raise typer.BadParameter(
-                    "Lookup editor seems not installed on this instance, you must to install it first.",
+                    "Lookup editor seems not installed on this instance, you must install it first.",
                     param_hint="Lookups",
                 )
             v = list(map(int, lookup_editor.version.split(".")))
