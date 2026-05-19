@@ -4,10 +4,11 @@
 
 <h1 style="text-align: center">Splunk Power Client</h1>
 
-[![Tests](https://img.shields.io/github/actions/workflow/status/nicolas-rdgs/Splunk-Power-Client/tests.yml?branch=main&label=tests&logo=github)](https://github.com/nicolas-rdgs/Splunk-Power-Client/actions/workflows/tests.yml)
-[![Publish](https://img.shields.io/github/actions/workflow/status/nicolas-rdgs/Splunk-Power-Client/publish.yml?label=publish&logo=github)](https://github.com/nicolas-rdgs/Splunk-Power-Client/actions/workflows/publish.yml)
-[![Coverage](https://img.shields.io/codecov/c/github/nicolas-rdgs/Splunk-Power-Client?logo=codecov)](https://codecov.io/gh/nicolas-rdgs/Splunk-Power-Client)
 [![PyPI](https://img.shields.io/pypi/v/splunk-power-client?logo=pypi&logoColor=white)](https://pypi.org/project/splunk-power-client/)
+[![Python](https://img.shields.io/badge/python-3.13%2B-blue.svg?logo=python&logoColor=white)](https://www.python.org/)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](https://github.com/nicolas-rdgs/Splunk-Power-Client/blob/main/LICENSE)
+[![Tests](https://github.com/nicolas-rdgs/Splunk-Power-Client/actions/workflows/test.yml/badge.svg)](https://github.com/nicolas-rdgs/Splunk-Power-Client/actions/workflows/test.yml)
+[![Docs](https://github.com/nicolas-rdgs/Splunk-Power-Client/actions/workflows/docs.yml/badge.svg)](https://github.com/nicolas-rdgs/Splunk-Power-Client/actions/workflows/docs.yml)
 
 ⚡ A modern, scriptable Python client to automate everyday Splunk tasks from the command line.
 
