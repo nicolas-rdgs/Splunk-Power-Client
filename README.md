@@ -1,16 +1,18 @@
-# Splunk Power Client
+<h1 align="center">Splunk Power Client</h1>
 
-> A modern, scriptable command-line client for Splunk power users and administrators.
+<p align="center"><em>A modern, scriptable command-line client for Splunk power users and administrators.</em></p>
 
-[![PyPI](https://img.shields.io/pypi/v/splunk-power-client.svg)](https://pypi.org/project/splunk-power-client/)
-[![Python](https://img.shields.io/badge/python-3.13%2B-blue.svg)](https://www.python.org/)
-[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![Tests](https://github.com/nicolas-rdgs/Splunk-Power-Client/actions/workflows/test.yml/badge.svg)](https://github.com/nicolas-rdgs/Splunk-Power-Client/actions/workflows/test.yml)
-[![Docs](https://github.com/nicolas-rdgs/Splunk-Power-Client/actions/workflows/docs.yml/badge.svg)](https://nicolas-rdgs.github.io/Splunk-Power-Client/)
-[![Code style: Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
-[![uv](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json)](https://github.com/astral-sh/uv)
-[![Conventional Commits](https://img.shields.io/badge/Conventional%20Commits-1.0.0-yellow.svg)](https://www.conventionalcommits.org)
-[![semantic-release](https://img.shields.io/badge/semantic--release-python-e10079?logo=semantic-release)](https://github.com/python-semantic-release/python-semantic-release)
+<p align="center">
+  <a href="https://pypi.org/project/splunk-power-client/"><img src="https://img.shields.io/pypi/v/splunk-power-client?logo=pypi&logoColor=white&label=pypi" alt="PyPI"/></a>
+  <a href="https://www.python.org/"><img src="https://img.shields.io/badge/python-3.13%2B-blue.svg" alt="Python"/></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green.svg" alt="License"/></a>
+  <a href="https://github.com/nicolas-rdgs/Splunk-Power-Client/actions/workflows/test.yml"><img src="https://github.com/nicolas-rdgs/Splunk-Power-Client/actions/workflows/test.yml/badge.svg" alt="Tests"/></a>
+  <a href="https://nicolas-rdgs.github.io/Splunk-Power-Client/"><img src="https://github.com/nicolas-rdgs/Splunk-Power-Client/actions/workflows/docs.yml/badge.svg" alt="Docs"/></a>
+  <a href="https://github.com/astral-sh/ruff"><img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json" alt="Code style: Ruff"/></a>
+  <a href="https://github.com/astral-sh/uv"><img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json" alt="uv"/></a>
+  <a href="https://www.conventionalcommits.org"><img src="https://img.shields.io/badge/Conventional%20Commits-1.0.0-yellow.svg" alt="Conventional Commits"/></a>
+  <a href="https://github.com/python-semantic-release/python-semantic-release"><img src="https://img.shields.io/badge/semantic--release-python-e10079?logo=semantic-release" alt="semantic-release"/></a>
+</p>
 
 `spc` is a Python CLI that streamlines day-to-day Splunk operations — uploading lookups, managing saved searches, dispatching jobs, editing configurations — through a fast, scriptable, multi-instance command line.
 
