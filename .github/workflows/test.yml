@@ -106,6 +106,7 @@ jobs:
           uv run spc instances set local \
             --host localhost --port 8089 \
             --username admin --password "$SPLUNK_PASSWORD" \
+            --app search --owner nobody --sharing app \
             --default
 
       - name: Pytest (integration)
