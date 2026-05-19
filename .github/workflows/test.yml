@@ -61,9 +61,9 @@ jobs:
               -C "$RUNNER_TEMP/splunk-apps"
           chmod -R 0777 "$RUNNER_TEMP/splunk-apps"
 
-      - name: Cache Splunk Docker image
+      - name: Restore Splunk Docker image cache
         id: cache-splunk-image
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: /tmp/splunk-image.tar
           key: docker-image-splunk-10.2.3
@@ -76,6 +76,13 @@ jobs:
             docker pull splunk/splunk:10.2.3
             docker save splunk/splunk:10.2.3 -o /tmp/splunk-image.tar
           fi
+
+      - name: Save Splunk Docker image cache
+        if: steps.cache-splunk-image.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: /tmp/splunk-image.tar
+          key: docker-image-splunk-10.2.3
 
       - name: Start Splunk Enterprise
         run: |
