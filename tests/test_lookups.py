@@ -7,7 +7,7 @@ from splunk_power_client.main import app
 
 pytestmark = pytest.mark.integration
 
-runner = CliRunner()
+runner = CliRunner(env={"COLUMNS": "200"})
 tests_dir = Path(__file__).resolve().parent
 tests_data = tests_dir / "data"
 
