@@ -129,6 +129,9 @@ docstring-code-line-length = "dynamic"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "--strict-markers"
+markers = [
+    "integration: tests requiring a live Splunk instance (deselect with '-m \"not integration\"')",
+]
 
 [tool.commitizen]
 name = "cz_conventional_commits"

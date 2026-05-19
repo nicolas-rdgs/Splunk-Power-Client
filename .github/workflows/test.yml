@@ -8,7 +8,7 @@ on:
   workflow_call:
 
 jobs:
-  test:
+  lint:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -31,13 +31,77 @@ jobs:
       - name: Ruff format check
         run: uv run ruff format --check .
 
-      - name: Pytest
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Set up Python
+        run: uv python install 3.13
+
+      - name: Install dependencies
+        run: uv sync --all-extras --all-groups --frozen
+
+      - name: Generate Splunk admin password
         run: |
-          uv run pytest \
+          PASSWORD=$(openssl rand -base64 24 | tr -d '/+=' | head -c 24)
+          echo "::add-mask::$PASSWORD"
+          echo "SPLUNK_PASSWORD=$PASSWORD" >> "$GITHUB_ENV"
+
+      - name: Extract Lookup Editor app
+        run: |
+          mkdir -p "$RUNNER_TEMP/splunk-apps"
+          tar -xzf tests/fixtures/splunk-app-for-lookup-file-editing_406.tgz \
+              -C "$RUNNER_TEMP/splunk-apps"
+          chmod -R 0777 "$RUNNER_TEMP/splunk-apps"
+
+      - name: Start Splunk Enterprise
+        run: |
+          docker run -d --name splunk \
+            -p 8000:8000 -p 8088:8088 -p 8089:8089 \
+            -e SPLUNK_START_ARGS=--accept-license \
+            -e SPLUNK_PASSWORD="$SPLUNK_PASSWORD" \
+            -v "$RUNNER_TEMP/splunk-apps/lookup_editor:/opt/splunk/etc/apps/lookup_editor" \
+            splunk/splunk:10.2.3
+
+      - name: Wait for Splunk to be ready
+        run: |
+          for i in $(seq 1 60); do
+            if curl -sk -u "admin:$SPLUNK_PASSWORD" \
+                 https://localhost:8089/services/server/info -o /dev/null; then
+              echo "Splunk ready after $((i*5))s"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::error::Splunk failed to start within 5 minutes"
+          docker logs splunk
+          exit 1
+
+      - name: Configure spc local instance
+        run: |
+          uv run spc instances set local \
+            --host localhost --port 8089 \
+            --username admin --password "$SPLUNK_PASSWORD" \
+            --default
+
+      - name: Pytest (integration)
+        run: |
+          uv run pytest -m integration \
             --cov \
             --cov-report=term \
             --cov-report=xml:coverage.xml \
             --junit-xml=report.xml
+
+      - name: Dump Splunk logs on failure
+        if: failure()
+        run: docker logs splunk
 
       - name: Upload test reports
         if: always()

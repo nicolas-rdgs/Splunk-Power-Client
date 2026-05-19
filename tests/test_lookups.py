@@ -1,8 +1,11 @@
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
 from splunk_power_client.main import app
+
+pytestmark = pytest.mark.integration
 
 runner = CliRunner()
 tests_dir = Path(__file__).resolve().parent

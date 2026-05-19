@@ -1,0 +1,4 @@
+id,alert_name,severity,enabled
+1,disk_full,high,true
+2,cpu_spike,medium,true
+3,login_failure,low,false
