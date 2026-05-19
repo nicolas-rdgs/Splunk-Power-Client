@@ -1,8 +1,6 @@
 name: test
 
 on:
-  push:
-    branches-ignore: [main]
   pull_request:
     branches: [main]
   workflow_call:
@@ -61,11 +59,35 @@ jobs:
               -C "$RUNNER_TEMP/splunk-apps"
           chmod -R 0777 "$RUNNER_TEMP/splunk-apps"
 
+      - name: Restore Splunk Docker image cache
+        id: cache-splunk-image
+        uses: actions/cache/restore@v4
+        with:
+          path: /tmp/splunk-image.tar
+          key: docker-image-splunk-10.2.3
+
+      - name: Load or pull Splunk image
+        run: |
+          if [ -f /tmp/splunk-image.tar ]; then
+            docker load -i /tmp/splunk-image.tar
+          else
+            docker pull splunk/splunk:10.2.3
+            docker save splunk/splunk:10.2.3 -o /tmp/splunk-image.tar
+          fi
+
+      - name: Save Splunk Docker image cache
+        if: steps.cache-splunk-image.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: /tmp/splunk-image.tar
+          key: docker-image-splunk-10.2.3
+
       - name: Start Splunk Enterprise
         run: |
           docker run -d --name splunk \
             -p 8000:8000 -p 8088:8088 -p 8089:8089 \
             -e SPLUNK_START_ARGS=--accept-license \
+            -e SPLUNK_GENERAL_TERMS=--accept-sgt-current-at-splunk-com \
             -e SPLUNK_PASSWORD="$SPLUNK_PASSWORD" \
             -v "$RUNNER_TEMP/splunk-apps/lookup_editor:/opt/splunk/etc/apps/lookup_editor" \
             splunk/splunk:10.2.3
@@ -89,6 +111,7 @@ jobs:
           uv run spc instances set local \
             --host localhost --port 8089 \
             --username admin --password "$SPLUNK_PASSWORD" \
+            --app search --owner nobody --sharing app \
             --default
 
       - name: Pytest (integration)

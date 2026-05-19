@@ -7,7 +7,7 @@ from splunk_power_client.main import app
 
 pytestmark = pytest.mark.integration
 
-runner = CliRunner()
+runner = CliRunner(env={"COLUMNS": "200"})
 tests_dir = Path(__file__).resolve().parent
 tests_data = tests_dir / "data"
 
@@ -22,7 +22,8 @@ def test_copy_csv_from_local_csv_to_splunk():
             "s://local",
         ],
     )
-    assert "done" in result.output
+    assert result.exit_code == 0, result.output
+    assert "Error" not in result.output, result.output
 
 
 def test_list_dummy_alerts_lookup_csv_is_present():
