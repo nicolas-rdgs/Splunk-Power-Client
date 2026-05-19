@@ -1,6 +1,6 @@
 [project]
 name = "splunk-power-client"
-version = "0.1.1"
+version = "0.1.2"
 description = "Splunk Power Client (SPC) is a Python module that provides spc command line to simplify the day-to-day tasks of Splunk users and administrators."
 readme = "README.md"
 license = "MIT"

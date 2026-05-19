@@ -6,6 +6,15 @@ from Conventional Commit messages on `main`.
 
 <!-- version list -->
 
+## v0.1.2 (2026-05-19)
+
+### Bug Fixes
+
+- **lookups**: Correct grammar in missing Lookup Editor error
+  ([#5](https://github.com/nicolas-rdgs/Splunk-Power-Client/pull/5),
+  [`f2d7d88`](https://github.com/nicolas-rdgs/Splunk-Power-Client/commit/f2d7d8804f871436de8a3045c8b9a3fbfcc69e39))
+
+
 ## v0.1.1 (2026-05-19)
 
 ### Bug Fixes
