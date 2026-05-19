@@ -1,0 +1,11 @@
+/*
+ * Custom theme tweaks for mkdocs-material.
+ */
+
+/* The repo source widget (_mkdocs/overrides/partials/source.html) is injected
+ * twice by the theme: once in the top header, once in the nav drawer/sidebar.
+ * Show the version/stars/forks facts only in the header; the nav drawer keeps
+ * just the repo name to avoid a visible duplicate. */
+.md-nav__source .md-source__facts {
+  display: none;
+}
