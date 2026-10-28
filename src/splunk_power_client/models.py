@@ -482,6 +482,63 @@ class SplunkInstance(BaseModel):
             )
 
     @update_service_namespace_from_instance
+    def create_kvstore_collection(
+        self,
+        name: str,
+        fields: dict[str, KvStoreFieldType],
+        accelerated_fields: Optional[dict[str, dict[str, int]]] = None,
+        enforce_types: bool = False,
+        replicate: bool = False,
+        definition_name: Optional[str] = None,
+    ) -> "SplunkInstanceLookupKvStore":
+        """
+        Create a KVStore collection and, optionally, its lookup definition.
+
+        ### Arguments
+        - *name: str
+          - Collection name
+        - *fields: dict[str, KvStoreFieldType]
+          - Field names and their types
+        - *accelerated_fields: Optional[dict[str, dict[str, int]]]
+          - Accelerations, e.g. {"by_user": {"user": 1}}
+        - *enforce_types: bool
+          - Reject documents whose values do not match field types
+        - *replicate: bool
+          - Replicate the collection to indexers
+        - *definition_name: Optional[str]
+          - Lookup definition (transforms.conf) to create, skipped if None
+        """
+        if name in self.service.kvstore:
+            raise ValueError(f"Collection '{name}' already exists")
+
+        self.service.kvstore.create(
+            name=name,
+            fields={field: str(field_type) for field, field_type in fields.items()},
+            accelerated_fields=accelerated_fields or {},
+            enforceTypes=enforce_types,
+            replicate=replicate,
+        )
+
+        if definition_name:
+            self.service.post(
+                "data/transforms/lookups",
+                name=definition_name,
+                external_type="kvstore",
+                collection=name,
+                fields_list=",".join(["_key", *fields]),
+            )
+
+        return SplunkInstanceLookupKvStore(
+            name=name,
+            instance=self,
+            namespace=SplunkNameSpace(
+                app=self.namespace.app,
+                owner=self.namespace.owner,
+                sharing=self.namespace.sharing,
+            ),
+        )
+
+    @update_service_namespace_from_instance
     def get_saved_searches(
         self,
         count: int = -1,

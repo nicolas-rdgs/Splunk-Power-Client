@@ -1,6 +1,7 @@
 from pathlib import Path
 from typing import Annotated, Optional
 
+import pandas as pd
 import typer
 from rich import box
 from rich.console import Console
@@ -10,6 +11,7 @@ from ..models import (
     CopyObject,
     CopyStatusEnum,
     FileType,
+    KvStoreFieldType,
     LocalLookupFile,
     SplunkInstance,
     SplunkInstanceLookupCSV,
@@ -464,3 +466,151 @@ def rm(
     except Exception as e:
         console.print(f"[red]Error: {e}[/red]")
         return typer.Exit(code=1)
+
+
+def parse_kv_fields(fields: list[str]) -> dict[str, KvStoreFieldType]:
+    """Parse `name[:type]` options into a fields dict, type defaults to string."""
+    parsed: dict[str, KvStoreFieldType] = {}
+    for field in fields:
+        name, _, field_type = field.partition(":")
+        if not name:
+            raise typer.BadParameter(f"Invalid field '{field}'", param_hint="--field")
+        try:
+            parsed[name] = KvStoreFieldType(field_type or KvStoreFieldType.STRING)
+        except ValueError:
+            raise typer.BadParameter(
+                f"Invalid type '{field_type}' for field '{name}', "
+                + f"expected one of: {', '.join(KvStoreFieldType)}",
+                param_hint="--field",
+            )
+    return parsed
+
+
+def parse_kv_accelerated_fields(
+    accelerated_fields: list[str],
+) -> dict[str, dict[str, int]]:
+    """Parse `name=field1,field2` options into an accelerated_fields dict."""
+    parsed: dict[str, dict[str, int]] = {}
+    for accelerated_field in accelerated_fields:
+        name, _, fields = accelerated_field.partition("=")
+        if not name or not fields:
+            raise typer.BadParameter(
+                f"Invalid accelerated field '{accelerated_field}', "
+                + "expected NAME=FIELD1,FIELD2",
+                param_hint="--accelerated-field",
+            )
+        parsed[name] = {field.strip(): 1 for field in fields.split(",")}
+    return parsed
+
+
+@app.command(
+    no_args_is_help=True,
+    help="Create a KVStore collection and its lookup definition.",
+)
+def mkkv(
+    target: Annotated[
+        str,
+        typer.Argument(show_default=False, help="<RemotePath>"),
+    ],
+    field: Annotated[
+        Optional[list[str]],
+        typer.Option(
+            "--field",
+            "-f",
+            help="Field as NAME[:TYPE] (string, number, bool, time, array). "
+            + "Repeat for each field.",
+            show_default=False,
+        ),
+    ] = None,
+    from_file: Annotated[
+        Optional[Path],
+        typer.Option(
+            help="Use the columns of a local lookup file as string fields.",
+            show_default=False,
+        ),
+    ] = None,
+    accelerated_field: Annotated[
+        Optional[list[str]],
+        typer.Option(
+            "--accelerated-field",
+            help="Acceleration as NAME=FIELD1,FIELD2. Repeat for each acceleration.",
+            show_default=False,
+        ),
+    ] = None,
+    enforce_types: Annotated[
+        bool,
+        typer.Option(help="Reject documents that do not match field types."),
+    ] = False,
+    replicate: Annotated[
+        bool,
+        typer.Option(help="Replicate the collection to indexers."),
+    ] = False,
+    definition: Annotated[
+        bool,
+        typer.Option(help="Create the lookup definition (transforms.conf)."),
+    ] = True,
+    definition_name: Annotated[
+        Optional[str],
+        typer.Option(
+            help="Lookup definition name. Defaults to the collection name.",
+            show_default=False,
+        ),
+    ] = None,
+):
+    try:
+        instance, collection_name = remote_parse_uri(uri=target)
+        if not collection_name:
+            raise typer.BadParameter(
+                "The target must contain a collection name", param_hint="TARGET"
+            )
+
+        fields: dict[str, KvStoreFieldType] = {}
+        if from_file:
+            rows = LocalLookupFile(name=from_file.as_posix()).read()
+            # xlsx files are read as a DataFrame
+            columns = rows.columns if isinstance(rows, pd.DataFrame) else rows[0]
+            fields.update({column: KvStoreFieldType.STRING for column in columns})
+        fields.update(parse_kv_fields(field or []))
+        fields.pop("_key", None)
+        if not fields:
+            raise typer.BadParameter(
+                "At least one field is required", param_hint="--field / --from-file"
+            )
+
+        instance.login()
+        lookup = instance.create_kvstore_collection(
+            name=collection_name,
+            fields=fields,
+            accelerated_fields=parse_kv_accelerated_fields(accelerated_field or []),
+            enforce_types=enforce_types,
+            replicate=replicate,
+            definition_name=(definition_name or collection_name)
+            if definition
+            else None,
+        )
+
+        table = Table(box=box.SIMPLE, title=f"KVStore '{lookup.name}' created")
+        table.add_column("Instance", justify="center")
+        table.add_column("Owner", justify="center")
+        table.add_column("App")
+        table.add_column("Field")
+        table.add_column("Type")
+        for field_name, field_type in lookup.config.fields.items():
+            table.add_row(
+                lookup.get_instance_name(),
+                lookup.get_namespace().owner,
+                lookup.get_namespace().app,
+                field_name,
+                str(field_type),
+            )
+        console.print(table)
+        if definition:
+            console.print(
+                f"Lookup definition: [green]{definition_name or collection_name}[/green]"
+            )
+
+    except typer.BadParameter:
+        raise
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
+        raise typer.Exit(code=1)

@@ -6,6 +6,7 @@ This command lets you quickly:
 - push lookups toward multiple instances
 - list lookups of an instance
 - delete specific lookup or multiples
+- create a KVStore collection with its lookup definition
 
 specifier que "rm" pour les kv, supprime uniquement les données pas le kvstore avec la conf
 
@@ -59,4 +60,29 @@ spc lookups cp '*.csv' s://dev
 
 # or sync some lookups from Production instance to Dev instance
 spc lookups cp 's://prod//my_app/*' s://dev//my_app
+```
+
+## Create a KVStore collection
+
+`spc lookups mkkv <RemotePath>` creates the collection (`storage/collections/config`) and, by default, a lookup definition with the same name (`transforms.conf`, `external_type = kvstore`) so it can be used straight away with `| inputlookup` / `| outputlookup`.
+
+- `--field / -f NAME[:TYPE]` — repeatable, `TYPE` is one of `string` (default), `number`, `bool`, `time`, `array`.
+- `--from-file PATH` — use the columns of a local CSV / JSON / Excel file as `string` fields. Can be combined with `--field` to override a type.
+- `--accelerated-field NAME=FIELD1,FIELD2` — repeatable, creates an acceleration (index) on the given fields.
+- `--enforce-types`, `--replicate` — collection options, both disabled by default.
+- `--no-definition` / `--definition-name NAME` — skip or rename the lookup definition.
+
+/// admonition | Namespace
+    type: tip
+
+KVStore collections are app-level objects: use `nobody` as owner, e.g. `s://dev/nobody/my_app/my_collection`.
+///
+
+```sh
+# create a collection with typed fields and an acceleration
+spc lookups mkkv s://dev/nobody/my_app/assets -f host -f ip -f last_seen:time --accelerated-field by_host=host
+
+# infer the schema from a local file, then load it
+spc lookups mkkv s://dev//my_app/assets --from-file assets.csv
+spc lookups cp assets.csv s://dev//my_app/assets --target-kv
 ```
