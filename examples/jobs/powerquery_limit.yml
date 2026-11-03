@@ -1,0 +1,38 @@
+# Ceiling of `| powerquery`: rows returned depending on the limit parameter.
+# Fixed window: 2026-11-03 12:00 -> 13:00 UTC.
+# S1 reference (console, `| group count()`): 1,026,672 Process Creation events.
+#
+#   spc jobs submit -f examples/jobs/powerquery_limit.yml
+#   spc jobs wait --batch pq-limit
+#
+# debug=true: the TA adds to the job messages the query sent to S1
+# (showing `| nolimit` or `| limit N`), its duration and the omitted events.
+batch: pq-limit
+defaults:
+  earliest: "1793707200"
+  latest: "1793710800"
+
+searches:
+  - label: T1_limit_0_nolimit
+    query: >-
+      | powerquery limit=0 debug=true usecase_id="LKP166"
+      search="event.type = 'Process Creation' | columns agent.uuid"
+      | stats count as rows_obtenues
+
+  - label: T2_limit_1500000
+    query: >-
+      | powerquery limit=1500000 debug=true usecase_id="LKP166"
+      search="event.type = 'Process Creation' | columns agent.uuid"
+      | stats count as rows_obtenues
+
+  - label: T3_temoin_limit_50000
+    query: >-
+      | powerquery limit=50000 debug=true usecase_id="LKP166"
+      search="event.type = 'Process Creation' | columns agent.uuid"
+      | stats count as rows_obtenues
+
+  - label: T4_limit_dans_search
+    query: >-
+      | powerquery debug=true usecase_id="LKP166"
+      search="event.type = 'Process Creation' | columns agent.uuid | limit 5"
+      | stats count as rows_obtenues

@@ -684,6 +684,50 @@ class SplunkInstance(BaseModel):
             )
 
     @update_service_namespace_from_instance
+    def submit_job(
+        self,
+        query: str,
+        earliest_time: str = "-24h",
+        latest_time: str = "now",
+        app: Optional[str] = None,
+        ttl: Optional[int] = None,
+    ) -> client.Job:
+        """
+        Dispatch a search job without waiting for it (exec_mode=normal).
+
+        ### Arguments
+        - *query: str
+          - SPL; prefixed with `search` unless it starts with a pipe.
+        - *earliest_time / latest_time: str
+          - Splunk time modifiers or epoch seconds.
+        - *app: Optional[str]
+          - App namespace to run the job in (default: instance namespace).
+        - *ttl: Optional[int]
+          - Job time-to-live in seconds, applied with `setttl` once dispatched.
+        """
+        query = query.strip()
+        if not query.startswith("|") and not query.lower().startswith("search "):
+            query = f"search {query}"
+
+        namespace_options = {}
+        if app:
+            namespace_options = {
+                "app": app,
+                "owner": self.service.namespace.owner or "nobody",
+            }
+
+        job = self.service.jobs.create(
+            query,
+            exec_mode="normal",
+            earliest_time=earliest_time,
+            latest_time=latest_time,
+            **namespace_options,
+        )
+        if ttl:
+            job.set_ttl(ttl)
+        return job
+
+    @update_service_namespace_from_instance
     def get_job_searchlog(self, job_sid: str) -> str:
         try:
             job = self.service.job(job_sid)
