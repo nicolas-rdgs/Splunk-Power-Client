@@ -86,3 +86,35 @@ spc lookups mkkv s://dev/nobody/my_app/assets -f host -f ip -f last_seen:time --
 spc lookups mkkv s://dev//my_app/assets --from-file assets.csv
 spc lookups cp assets.csv s://dev//my_app/assets --target-kv
 ```
+
+## KVStore as code (YAML templates)
+
+Declare a collection (`collections.conf`) and its lookup definition (`transforms.conf`) once in YAML, then apply them to any instance. Templates are validated with pydantic against the Splunk 10.0 specs (unknown keys and invalid values are refused) and translated into REST calls.
+
+```
+~/.spc/templates/             # or --templates-dir / SPC_TEMPLATES_DIR (e.g. a git repo)
+├── collections/assets.yaml
+└── definitions/assets.yaml
+```
+
+Annotated templates listing every key and allowed value: [`examples/kvstore/collections/_template.yaml`](https://github.com/nicolas-rdgs/Splunk-Power-Client/blob/main/examples/kvstore/collections/_template.yaml) and [`examples/kvstore/definitions/_template.yaml`](https://github.com/nicolas-rdgs/Splunk-Power-Client/blob/main/examples/kvstore/definitions/_template.yaml).
+
+```sh
+# show what would change, nothing is written
+spc lookups mkkv s://dev//my_app -c assets -d assets --dry-run
+
+# create or update (idempotent): same command after editing the YAML
+spc lookups mkkv s://dev//my_app -c assets -d assets
+spc lookups mkkv s://prod//my_app -c assets -d assets
+```
+
+- `-c` / `-d` take a template name (resolved in `collections/` / `definitions/`) or a path to a `.yaml` file.
+- Only the changed keys are sent on update. Keys present on Splunk but absent from the template (fields, accelerations) are reported as `drift (kept)` and never removed.
+- `sharing` in a template is applied through the object ACL, keeping its current owner.
+- With `-d` alone, a collection template with the same name is used, if present, for `fields_list` and consistency checks.
+
+/// admonition | Search head cluster
+    type: tip
+
+Apply on any member: configuration replication propagates the objects to the other members.
+///

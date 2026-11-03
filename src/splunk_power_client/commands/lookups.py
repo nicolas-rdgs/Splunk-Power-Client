@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Annotated, Optional
+from typing import TYPE_CHECKING, Annotated, Optional
 
 import pandas as pd
 import typer
@@ -19,6 +19,9 @@ from ..models import (
 )
 from ..table_views import ScrollingTableConfig, ScrollingTableView
 from ..utils import get_instance_from_settings, remote_parse_uri
+
+if TYPE_CHECKING:
+    from ..kvstore_apply import Plan
 
 app = typer.Typer(no_args_is_help=True)
 
@@ -556,7 +559,65 @@ def mkkv(
             show_default=False,
         ),
     ] = None,
+    collection_template: Annotated[
+        Optional[str],
+        typer.Option(
+            "--collection",
+            "-c",
+            help="Collection YAML template: name in <templates-dir>/collections/ "
+            + "or path. Created or updated (idempotent).",
+            show_default=False,
+            rich_help_panel="Templates (as code)",
+        ),
+    ] = None,
+    definition_template: Annotated[
+        Optional[str],
+        typer.Option(
+            "--definition",
+            "-d",
+            help="Lookup definition YAML template: name in "
+            + "<templates-dir>/definitions/ or path. Created or updated (idempotent).",
+            show_default=False,
+            rich_help_panel="Templates (as code)",
+        ),
+    ] = None,
+    templates_dir: Annotated[
+        Path,
+        typer.Option(
+            envvar="SPC_TEMPLATES_DIR",
+            help="Directory holding collections/ and definitions/ templates.",
+            rich_help_panel="Templates (as code)",
+        ),
+    ] = Path("~/.spc/templates"),
+    dry_run: Annotated[
+        bool,
+        typer.Option(
+            help="Show the changes against Splunk without applying them.",
+            rich_help_panel="Templates (as code)",
+        ),
+    ] = False,
 ):
+    if collection_template or definition_template:
+        legacy = {
+            "--field": field,
+            "--from-file": from_file,
+            "--accelerated-field": accelerated_field,
+            "--definition-name": definition_name,
+        }
+        used = [option for option, value in legacy.items() if value]
+        if used:
+            raise typer.BadParameter(
+                f"{', '.join(used)} cannot be combined with templates",
+                param_hint="--collection / --definition",
+            )
+        return mkkv_from_templates(
+            target=target,
+            collection_template=collection_template,
+            definition_template=definition_template,
+            templates_dir=templates_dir.expanduser(),
+            dry_run=dry_run,
+        )
+
     try:
         instance, collection_name = remote_parse_uri(uri=target)
         if not collection_name:
@@ -608,6 +669,134 @@ def mkkv(
             console.print(
                 f"Lookup definition: [green]{definition_name or collection_name}[/green]"
             )
+
+    except typer.BadParameter:
+        raise
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
+        raise typer.Exit(code=1)
+
+
+def _uri_app(target: str) -> Optional[str]:
+    """App explicitly given in the URI (s://inst/owner/app), None otherwise."""
+    from urllib.parse import urlparse
+
+    segments = urlparse(target).path[1:].split("/")
+    return segments[1] or None if len(segments) >= 2 else None
+
+
+def _print_plan(plan: "Plan") -> None:
+    from ..kvstore_apply import Action
+
+    state = "update" if plan.exists else "create"
+    table = Table(
+        box=box.SIMPLE,
+        title=f"{plan.kind} '{plan.name}' (app {plan.app}) : {state}",
+        title_justify="left",
+    )
+    table.add_column("Key")
+    table.add_column("Current")
+    table.add_column("Desired")
+    table.add_column("Action")
+    colors = {Action.ADD: "green", Action.UPDATE: "yellow", Action.DRIFT: "red"}
+    for change in plan.changes:
+        table.add_row(
+            change.key,
+            change.current or "",
+            change.desired or "",
+            f"[{colors[change.action]}]{change.action}[/]",
+        )
+    if plan.acl_to_apply:
+        table.add_row(
+            "sharing", plan.current_sharing or "", plan.sharing, "[yellow]acl[/]"
+        )
+    if table.row_count:
+        console.print(table)
+    else:
+        console.print(f"{plan.kind} '{plan.name}' (app {plan.app}) : up to date")
+
+
+def mkkv_from_templates(
+    target: str,
+    collection_template: Optional[str],
+    definition_template: Optional[str],
+    templates_dir: Path,
+    dry_run: bool,
+) -> None:
+    from pydantic import ValidationError
+
+    from ..kvstore_apply import apply_plan, plan_collection, plan_definition
+    from ..kvstore_templates import (
+        CollectionTemplate,
+        DefinitionTemplate,
+        resolve_template,
+    )
+
+    try:
+        collection = definition = None
+        if collection_template:
+            path = resolve_template(collection_template, "collections", templates_dir)
+            collection = CollectionTemplate.from_yaml(path)
+        if definition_template:
+            path = resolve_template(definition_template, "definitions", templates_dir)
+            definition = DefinitionTemplate.from_yaml(path)
+            if collection is None:
+                # same-name collection template, used for fields_list and checks
+                path = (
+                    templates_dir / "collections" / f"{definition.collection_name}.yaml"
+                )
+                if path.exists():
+                    collection = CollectionTemplate.from_yaml(path)
+                    console.print(f"Using collection template {path}")
+            elif definition.collection_name != collection.name:
+                raise ValueError(
+                    f"Definition '{definition.name}' targets collection "
+                    + f"'{definition.collection_name}', not '{collection.name}'"
+                )
+    except FileNotFoundError as e:
+        console.print(f"[red]Template not found: {e.filename}[/red]")
+        raise typer.Exit(code=1)
+    except (ValidationError, ValueError) as e:
+        console.print(f"[red]Invalid template: {e}[/red]")
+        raise typer.Exit(code=1)
+
+    try:
+        instance, name = remote_parse_uri(uri=target)
+        expected = {t.name for t in (collection, definition) if t}
+        if name and name not in expected:
+            raise typer.BadParameter(
+                f"'{name}' does not match the template names: {', '.join(expected)}",
+                param_hint="TARGET",
+            )
+        uri_app = _uri_app(target)
+        for template in (collection, definition):
+            if template and template.app and uri_app and template.app != uri_app:
+                raise typer.BadParameter(
+                    f"Template '{template.name}' is for app '{template.app}', "
+                    + f"not '{uri_app}'",
+                    param_hint="TARGET",
+                )
+
+        instance.login()
+        service = instance.service
+        app_name = instance.namespace.app
+        plans = []
+        if collection_template:
+            plans.append(plan_collection(service, collection, app_name))
+        if definition:
+            plans.append(plan_definition(service, definition, app_name, collection))
+
+        console.print(f"Instance: [bold]{instance.name}[/bold]")
+        for plan in plans:
+            _print_plan(plan)
+
+        if dry_run:
+            console.print("[yellow]Dry run: nothing applied[/yellow]")
+            return
+        for plan in plans:
+            if plan.has_changes:
+                apply_plan(service, plan)
+                console.print(f"[green]{plan.kind} '{plan.name}' applied[/green]")
 
     except typer.BadParameter:
         raise

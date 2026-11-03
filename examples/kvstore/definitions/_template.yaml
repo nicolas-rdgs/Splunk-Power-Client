@@ -1,0 +1,38 @@
+# KVStore lookup definition template -> transforms.conf (external_type = kvstore)
+# REST: POST data/transforms/lookups (create) / data/transforms/lookups/<name> (update)
+# Validated by splunk_power_client.kvstore_templates.DefinitionTemplate (unknown keys rejected).
+# Allowed values: Splunk 10.0 transforms.conf.spec. Settings that do not apply to
+# kvstore (filename, replicate, reverse_lookup_honor_case_sensitive_match...) are refused.
+
+template_version: 1          # required value: 1
+
+# --- Identity ---------------------------------------------------------------
+name: my_collection_lookup   # REQUIRED. Name used in | inputlookup / | lookup
+app: my_app                  # optional, else taken from the target URI
+sharing: global              # optional: user | app | global
+external_type: kvstore       # only kvstore is accepted here
+collection: my_collection    # optional, defaults to `name`. Must match the collection template
+
+# --- Fields ------------------------------------------------------------------
+# Optional: defaults to _key + every field of the collection template.
+# Every field must exist in the collection (or be _key).
+fields_list: [_key, host, ip, score, is_vip, last_seen]
+
+# --- Matching (all optional, Splunk defaults in comments) ---------------------
+filter: 'is_vip="true"'      # search expression applied when data is read from the KVStore
+max_matches: 1               # int 1..1000 (default 100, or 1 for temporal lookups)
+min_matches: 0               # int >= 0, <= max_matches (default 0)
+default_match: unknown       # value returned when fewer than min_matches
+case_sensitive_match: true   # bool (default true). false works only if the KVStore
+                             # data is entirely lowercase
+match_type:                  # field -> EXACT (default) | WILDCARD | CIDR
+  ip: CIDR                   # rendered as "CIDR(ip)"
+
+# --- Temporal lookup (optional, all need time_field) --------------------------
+# time_field: last_seen       # field holding the timestamp
+# time_format: "%s.%Q"        # strptime format (default %s.%Q)
+# max_offset_secs: 86400      # int >= 0
+# min_offset_secs: 0          # int >= 0
+
+# --- Performance (optional) ---------------------------------------------------
+max_ext_batch: 300           # int 1..1000 (default 300), kvstore only
