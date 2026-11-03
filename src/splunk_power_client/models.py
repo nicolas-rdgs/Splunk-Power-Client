@@ -27,12 +27,13 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    PrivateAttr,
     ValidationInfo,
     computed_field,
     field_validator,
     model_validator,
 )
-from splunklib.binding import AuthenticationError
+from splunklib.binding import AuthenticationError, HTTPError
 
 from .splunk_sdk_patch import NewService
 
@@ -963,6 +964,9 @@ class SplunkInstanceInformations(BaseModel):
     shutting_down: int
     version: str
     is_restarting: bool = False
+    # cluster_search_head role declared but node not part of any cluster
+    # (standalone search head with a leftover SHC configuration)
+    _shc_standalone: bool = PrivateAttr(False)
 
     def model_post_init(self, context: Any):
         response = json.load(
@@ -976,12 +980,19 @@ class SplunkInstanceInformations(BaseModel):
         self.current_context = current_context
 
         if self.is_search_head_cluster:
-            response = self.service.get(
-                "/services/shcluster/member/members",
-                output_mode="json",
-                count=0,
-                search='eai:acl.owner="*"',
-            )
+            try:
+                response = self.service.get(
+                    "/services/shcluster/member/members",
+                    output_mode="json",
+                    count=0,
+                    search='eai:acl.owner="*"',
+                )
+            except HTTPError as error:
+                # 503 "This node is not part of any cluster configuration"
+                if error.status != 503:
+                    raise
+                self._shc_standalone = True
+                return
             response_json = json.load(response.body)
             for entry in response_json["entry"]:
                 self.search_head_cluster_members.append(
@@ -1016,10 +1027,9 @@ class SplunkInstanceInformations(BaseModel):
         # is a shc deployer necessarily a cluster_search_head or is it a bad configuration?
         # otherwise, all api /services/shcluster* fail if the splunk has shc_deployer role because it's not a cluster member
         return (
-            True
-            if "cluster_search_head" in self.server_roles
+            "cluster_search_head" in self.server_roles
             and "shc_deployer" not in self.server_roles
-            else False
+            and not self._shc_standalone
         )
 
     @computed_field
