@@ -317,7 +317,8 @@ def cp(
                     if isinstance(obj.dst, SplunkInstanceLookupKvStore):
                         obj.dst.write(source_data, append=kv_append)
                     else:
-                        obj.dst.write(source_data)
+                        # header of the source, for header-only CSV lookups
+                        obj.dst.write(source_data, fieldnames=obj.src.fieldnames)
                     obj.status = CopyStatusEnum.DONE
                 except Exception as error:
                     obj.status = CopyStatusEnum.FAILED

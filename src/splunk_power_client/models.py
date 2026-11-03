@@ -1314,10 +1314,26 @@ class SplunkLookupDefinition(BaseModel):
         return None
 
 
+def csv_headers(
+    contents: list[dict[str, Any]], fieldnames: Optional[list[str]] = None
+) -> list[str]:
+    """
+    CSV header of a lookup to write: keys of the first row, or the header read from the
+    source when it has no row (header-only lookup). Raises when there is neither.
+    """
+    if contents:
+        return list(contents[0].keys())
+    if fieldnames:
+        return list(fieldnames)
+    raise ValueError("Empty lookup without header: nothing to write")
+
+
 class Lookup(BaseModel):
     name: Optional[str] = None
     definition: Optional[SplunkLookupDefinition] = None
     namespace: Optional[SplunkNameSpace] = None
+    # CSV header seen by the last read(), kept for header-only lookups
+    fieldnames: Optional[list[str]] = None
 
     model_config = {"arbitrary_types_allowed": True, "from_attributes": True}
 
@@ -1392,12 +1408,20 @@ class SplunkInstanceLookupCSV(Lookup):
 
         if self.csv_field_size_limit:
             csv.field_size_limit(self.csv_field_size_limit)
-        return list(csv.DictReader(io.TextIOWrapper(response.body)))
+        reader = csv.DictReader(io.TextIOWrapper(response.body))
+        rows = list(reader)
+        # keep the header: a lookup with a header and no row is still a lookup
+        self.fieldnames = reader.fieldnames
+        return rows
 
-    def write(self, contents: list[dict[str, Any]]):
+    def write(
+        self,
+        contents: list[dict[str, Any]],
+        fieldnames: Optional[list[str]] = None,
+    ):
         # convert dict to list of list with csv headers as first row
-        headers = list(contents[0].keys())
-        contents = [headers] + [list(d.values()) for d in contents]
+        headers = csv_headers(contents, fieldnames)
+        contents = [headers] + [[d.get(h, "") for h in headers] for d in contents]
         response = self.instance.service.post(
             "/services/data/lookup_edit/lookup_contents",
             body={
@@ -1593,7 +1617,10 @@ class LocalLookupFile(Lookup):
         if self.csv_field_size_limit:
             csv.field_size_limit(self.csv_field_size_limit)
         with self.file.open("r") as file:
-            return list(csv.DictReader(file))
+            reader = csv.DictReader(file)
+            rows = list(reader)
+            self.fieldnames = reader.fieldnames
+            return rows
 
     def read_from_excel_file(self) -> list[dict[str, Any]]:
         return pd.read_excel(self.file)
@@ -1602,9 +1629,9 @@ class LocalLookupFile(Lookup):
         with self.file.open("r") as file:
             return json.load(file)
 
-    def write(self, data: list[dict[str, Any]]):
+    def write(self, data: list[dict[str, Any]], fieldnames: Optional[list[str]] = None):
         if self.file_type == FileType.CSV:
-            self.write_to_csv_file(data)
+            self.write_to_csv_file(data, fieldnames)
         elif self.file_type == FileType.XLSX:
             self.write_to_excel_file(data)
         elif self.file_type == FileType.JSON:
@@ -1617,9 +1644,12 @@ class LocalLookupFile(Lookup):
                 param_hint="LocalLookupFile",
             )
 
-    def write_to_csv_file(self, data: list[list[str]]):
+    def write_to_csv_file(
+        self, data: list[dict[str, Any]], fieldnames: Optional[list[str]] = None
+    ):
+        headers = csv_headers(data, fieldnames)
         with self.file.open("w") as file:
-            writer = csv.DictWriter(file, fieldnames=list(data[0].keys()))
+            writer = csv.DictWriter(file, fieldnames=headers)
             writer.writeheader()
             writer.writerows(data)
 
