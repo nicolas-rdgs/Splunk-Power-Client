@@ -190,8 +190,9 @@ def apply_plan(service, plan: Plan) -> None:
     elif plan.to_apply:
         service.post(f"{plan.endpoint}/{plan.name}", **plan.to_apply)
     if plan.acl_to_apply:
+        # sent in the body: as keyword arguments, splunklib takes owner and
+        # sharing as the URL namespace and the ACL endpoint answers 400
         service.post(
             f"{plan.endpoint}/{plan.name}/acl",
-            sharing=plan.sharing,
-            owner=plan.current_owner or "nobody",
+            body={"sharing": plan.sharing, "owner": plan.current_owner or "nobody"},
         )

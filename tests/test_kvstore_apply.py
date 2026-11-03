@@ -63,7 +63,7 @@ def test_create_collection_and_definition():
     assert params["field.score"] == "number"
     assert params["accelerated_fields.by_host"] == '{"host": 1}'
     assert acl[2] == "storage/collections/config/assets/acl"
-    assert acl[3] == {"sharing": "global", "owner": "nobody"}
+    assert acl[3] == {"body": {"sharing": "global", "owner": "nobody"}}
     assert dpath == "data/transforms/lookups"
     assert dparams["fields_list"] == "_key, host, score"
     assert dparams["max_matches"] == "1"
@@ -123,4 +123,4 @@ def test_update_collection_sends_only_changes_and_reports_drift():
         "accelerated_fields.by_host": '{"host": 1}',
     }
     assert acl_path.endswith("/acl")
-    assert acl == {"sharing": "global", "owner": "bob"}  # owner kept
+    assert acl == {"body": {"sharing": "global", "owner": "bob"}}  # owner kept
