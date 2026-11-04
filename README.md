@@ -67,7 +67,7 @@ For the full command reference, examples, and recipes, see the **[documentation]
 |---|:---:|---|
 | `instances` | ✅ | Add, list, and switch between Splunk instances |
 | `info` | ✅ | Show details of the active Splunk instance |
-| `lookups` | ✅ | Upload, synchronise, list, delete CSV / KVStore lookups |
+| `lookups` | ✅ | Upload, synchronise, list, delete CSV / KVStore lookups, create KVStore collections |
 | `secrets` | ✅ | Manage Splunk secrets |
 | `jobs` | ✅ | List and inspect search jobs |
 | `debug/refresh` | ✅ | Refresh Splunk configuration without restart |

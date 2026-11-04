@@ -6,8 +6,13 @@ This command lets you quickly:
 - push lookups toward multiple instances
 - list lookups of an instance
 - delete specific lookup or multiples
+- create a KVStore collection with its lookup definition
 
-specifier que "rm" pour les kv, supprime uniquement les données pas le kvstore avec la conf
+/// admonition | Deleting a KVStore
+    type: warning
+
+`spc lookups rm --kv` deletes the matching collections (configuration and data) and the kvstore lookup definitions of their app pointing to them. Add `--data-only` to only empty the collections.
+///
 
 ## URI specific
 
@@ -60,3 +65,72 @@ spc lookups cp '*.csv' s://dev
 # or sync some lookups from Production instance to Dev instance
 spc lookups cp 's://prod//my_app/*' s://dev//my_app
 ```
+
+## Create a KVStore collection
+
+`spc lookups mkkv <RemotePath>` creates the collection (`storage/collections/config`) and, by default, a lookup definition with the same name (`transforms.conf`, `external_type = kvstore`) so it can be used straight away with `| inputlookup` / `| outputlookup`.
+
+- `--field / -f NAME[:TYPE]` — repeatable, `TYPE` is one of `string` (default), `number`, `bool`, `time`, `array`.
+- `--from-file PATH` — use the columns of a local CSV / JSON / Excel file as `string` fields. Can be combined with `--field` to override a type.
+- `--accelerated-field NAME=FIELD1,FIELD2` — repeatable, creates an acceleration (index) on the given fields.
+- `--enforce-types`, `--replicate` — collection options, both disabled by default.
+- `--no-definition` / `--definition-name NAME` — skip or rename the lookup definition.
+
+/// admonition | Namespace
+    type: tip
+
+KVStore collections are app-level objects: use `nobody` as owner, e.g. `s://dev/nobody/my_app/my_collection`.
+///
+
+```sh
+# create a collection with typed fields and an acceleration
+spc lookups mkkv s://dev/nobody/my_app/assets -f host -f ip -f last_seen:time --accelerated-field by_host=host
+
+# infer the schema from a local file, then load it
+spc lookups mkkv s://dev//my_app/assets --from-file assets.csv
+spc lookups cp assets.csv s://dev//my_app/assets --target-kv
+```
+
+## Delete a KVStore collection
+
+```sh
+# delete the collection (configuration and data) and the kvstore lookup
+# definitions of its app pointing to it
+spc lookups rm --kv --search "name=assets"
+
+# only empty the collection, keep its configuration and definitions
+spc lookups rm --kv --data-only --search "name=assets"
+```
+
+## KVStore as code (YAML templates)
+
+Declare a collection (`collections.conf`) and its lookup definition (`transforms.conf`) once in YAML, then apply them to any instance. Templates are validated with pydantic against the Splunk 10.0 specs (unknown keys and invalid values are refused) and translated into REST calls.
+
+```
+~/.spc/templates/             # or --templates-dir / SPC_TEMPLATES_DIR (e.g. a git repo)
+├── collections/assets.yaml
+└── definitions/assets.yaml
+```
+
+Annotated templates listing every key and allowed value: [`examples/kvstore/collections/_template.yaml`](https://github.com/nicolas-rdgs/Splunk-Power-Client/blob/main/examples/kvstore/collections/_template.yaml) and [`examples/kvstore/definitions/_template.yaml`](https://github.com/nicolas-rdgs/Splunk-Power-Client/blob/main/examples/kvstore/definitions/_template.yaml).
+
+```sh
+# show what would change, nothing is written
+spc lookups mkkv s://dev//my_app -c assets -d assets --dry-run
+
+# create or update (idempotent): same command after editing the YAML
+spc lookups mkkv s://dev//my_app -c assets -d assets
+spc lookups mkkv s://prod//my_app -c assets -d assets
+```
+
+- `-c` / `-d` take a template name (resolved in `collections/` / `definitions/`) or a path to a `.yaml` file.
+- Collections: only the changed keys are sent on update. Keys present on Splunk but absent from the template (fields, accelerations) are reported as `drift (kept)` and never removed.
+- Definitions: the template is the full desired state. Splunk rewrites the `transforms.conf` stanza on update, so the whole template is sent and a key set on Splunk but absent from the template is removed.
+- `sharing` in a template is applied through the object ACL, keeping its current owner.
+- With `-d` alone, a collection template with the same name is used, if present, for `fields_list` and consistency checks.
+
+/// admonition | Search head cluster
+    type: tip
+
+Apply on any member: configuration replication propagates the objects to the other members.
+///

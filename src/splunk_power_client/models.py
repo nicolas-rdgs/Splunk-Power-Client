@@ -27,12 +27,13 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    PrivateAttr,
     ValidationInfo,
     computed_field,
     field_validator,
     model_validator,
 )
-from splunklib.binding import AuthenticationError
+from splunklib.binding import AuthenticationError, HTTPError
 
 from .splunk_sdk_patch import NewService
 
@@ -481,6 +482,63 @@ class SplunkInstance(BaseModel):
             )
 
     @update_service_namespace_from_instance
+    def create_kvstore_collection(
+        self,
+        name: str,
+        fields: dict[str, KvStoreFieldType],
+        accelerated_fields: Optional[dict[str, dict[str, int]]] = None,
+        enforce_types: bool = False,
+        replicate: bool = False,
+        definition_name: Optional[str] = None,
+    ) -> "SplunkInstanceLookupKvStore":
+        """
+        Create a KVStore collection and, optionally, its lookup definition.
+
+        ### Arguments
+        - *name: str
+          - Collection name
+        - *fields: dict[str, KvStoreFieldType]
+          - Field names and their types
+        - *accelerated_fields: Optional[dict[str, dict[str, int]]]
+          - Accelerations, e.g. {"by_user": {"user": 1}}
+        - *enforce_types: bool
+          - Reject documents whose values do not match field types
+        - *replicate: bool
+          - Replicate the collection to indexers
+        - *definition_name: Optional[str]
+          - Lookup definition (transforms.conf) to create, skipped if None
+        """
+        if name in self.service.kvstore:
+            raise ValueError(f"Collection '{name}' already exists")
+
+        self.service.kvstore.create(
+            name=name,
+            fields={field: str(field_type) for field, field_type in fields.items()},
+            accelerated_fields=accelerated_fields or {},
+            enforceTypes=enforce_types,
+            replicate=replicate,
+        )
+
+        if definition_name:
+            self.service.post(
+                "data/transforms/lookups",
+                name=definition_name,
+                external_type="kvstore",
+                collection=name,
+                fields_list=",".join(["_key", *fields]),
+            )
+
+        return SplunkInstanceLookupKvStore(
+            name=name,
+            instance=self,
+            namespace=SplunkNameSpace(
+                app=self.namespace.app,
+                owner=self.namespace.owner,
+                sharing=self.namespace.sharing,
+            ),
+        )
+
+    @update_service_namespace_from_instance
     def get_saved_searches(
         self,
         count: int = -1,
@@ -624,6 +682,50 @@ class SplunkInstance(BaseModel):
                 f"Unknown error: {error}",
                 param_hint=f"Splunk Instance ({self.name})",
             )
+
+    @update_service_namespace_from_instance
+    def submit_job(
+        self,
+        query: str,
+        earliest_time: str = "-24h",
+        latest_time: str = "now",
+        app: Optional[str] = None,
+        ttl: Optional[int] = None,
+    ) -> client.Job:
+        """
+        Dispatch a search job without waiting for it (exec_mode=normal).
+
+        ### Arguments
+        - *query: str
+          - SPL; prefixed with `search` unless it starts with a pipe.
+        - *earliest_time / latest_time: str
+          - Splunk time modifiers or epoch seconds.
+        - *app: Optional[str]
+          - App namespace to run the job in (default: instance namespace).
+        - *ttl: Optional[int]
+          - Job time-to-live in seconds, applied with `setttl` once dispatched.
+        """
+        query = query.strip()
+        if not query.startswith("|") and not query.lower().startswith("search "):
+            query = f"search {query}"
+
+        namespace_options = {}
+        if app:
+            namespace_options = {
+                "app": app,
+                "owner": self.service.namespace.owner or "nobody",
+            }
+
+        job = self.service.jobs.create(
+            query,
+            exec_mode="normal",
+            earliest_time=earliest_time,
+            latest_time=latest_time,
+            **namespace_options,
+        )
+        if ttl:
+            job.set_ttl(ttl)
+        return job
 
     @update_service_namespace_from_instance
     def get_job_searchlog(self, job_sid: str) -> str:
@@ -963,6 +1065,9 @@ class SplunkInstanceInformations(BaseModel):
     shutting_down: int
     version: str
     is_restarting: bool = False
+    # cluster_search_head role declared but node not part of any cluster
+    # (standalone search head with a leftover SHC configuration)
+    _shc_standalone: bool = PrivateAttr(False)
 
     def model_post_init(self, context: Any):
         response = json.load(
@@ -976,12 +1081,19 @@ class SplunkInstanceInformations(BaseModel):
         self.current_context = current_context
 
         if self.is_search_head_cluster:
-            response = self.service.get(
-                "/services/shcluster/member/members",
-                output_mode="json",
-                count=0,
-                search='eai:acl.owner="*"',
-            )
+            try:
+                response = self.service.get(
+                    "/services/shcluster/member/members",
+                    output_mode="json",
+                    count=0,
+                    search='eai:acl.owner="*"',
+                )
+            except HTTPError as error:
+                # 503 "This node is not part of any cluster configuration"
+                if error.status != 503:
+                    raise
+                self._shc_standalone = True
+                return
             response_json = json.load(response.body)
             for entry in response_json["entry"]:
                 self.search_head_cluster_members.append(
@@ -1016,10 +1128,9 @@ class SplunkInstanceInformations(BaseModel):
         # is a shc deployer necessarily a cluster_search_head or is it a bad configuration?
         # otherwise, all api /services/shcluster* fail if the splunk has shc_deployer role because it's not a cluster member
         return (
-            True
-            if "cluster_search_head" in self.server_roles
+            "cluster_search_head" in self.server_roles
             and "shc_deployer" not in self.server_roles
-            else False
+            and not self._shc_standalone
         )
 
     @computed_field
@@ -1314,10 +1425,26 @@ class SplunkLookupDefinition(BaseModel):
         return None
 
 
+def csv_headers(
+    contents: list[dict[str, Any]], fieldnames: Optional[list[str]] = None
+) -> list[str]:
+    """
+    CSV header of a lookup to write: keys of the first row, or the header read from the
+    source when it has no row (header-only lookup). Raises when there is neither.
+    """
+    if contents:
+        return list(contents[0].keys())
+    if fieldnames:
+        return list(fieldnames)
+    raise ValueError("Empty lookup without header: nothing to write")
+
+
 class Lookup(BaseModel):
     name: Optional[str] = None
     definition: Optional[SplunkLookupDefinition] = None
     namespace: Optional[SplunkNameSpace] = None
+    # CSV header seen by the last read(), kept for header-only lookups
+    fieldnames: Optional[list[str]] = None
 
     model_config = {"arbitrary_types_allowed": True, "from_attributes": True}
 
@@ -1392,12 +1519,20 @@ class SplunkInstanceLookupCSV(Lookup):
 
         if self.csv_field_size_limit:
             csv.field_size_limit(self.csv_field_size_limit)
-        return list(csv.DictReader(io.TextIOWrapper(response.body)))
+        reader = csv.DictReader(io.TextIOWrapper(response.body))
+        rows = list(reader)
+        # keep the header: a lookup with a header and no row is still a lookup
+        self.fieldnames = reader.fieldnames
+        return rows
 
-    def write(self, contents: list[dict[str, Any]]):
+    def write(
+        self,
+        contents: list[dict[str, Any]],
+        fieldnames: Optional[list[str]] = None,
+    ):
         # convert dict to list of list with csv headers as first row
-        headers = list(contents[0].keys())
-        contents = [headers] + [list(d.values()) for d in contents]
+        headers = csv_headers(contents, fieldnames)
+        contents = [headers] + [[d.get(h, "") for h in headers] for d in contents]
         response = self.instance.service.post(
             "/services/data/lookup_edit/lookup_contents",
             body={
@@ -1533,6 +1668,38 @@ class SplunkInstanceLookupKvStore(Lookup):
         else:
             return self.collection.data.delete()
 
+    def drop(self) -> list[str]:
+        """
+        Delete the collection itself (configuration and data) and, first, the
+        kvstore lookup definitions of its app that point to it: a definition left
+        without its collection is a broken lookup.
+
+        Returns the names of the deleted lookup definitions.
+        """
+        service = self.instance.service
+        app = self.get_namespace().app
+        response = service.get(
+            f"/servicesNS/-/{app}/data/transforms/lookups",
+            output_mode="json",
+            count=0,
+            search=f"collection={self.name}",
+        )
+        definitions = []
+        for entry in json.load(response.body)["entry"]:
+            content, acl = entry["content"], entry["acl"]
+            if (
+                content.get("external_type") == "kvstore"
+                and content.get("collection") == self.name
+                and acl.get("app") == app
+            ):
+                service.delete(
+                    f"/servicesNS/{acl['owner']}/{app}"
+                    + f"/data/transforms/lookups/{entry['name']}"
+                )
+                definitions.append(entry["name"])
+        self.collection.delete()
+        return definitions
+
     def get_namespace(self) -> SplunkNameSpace:
         if self.namespace is None:
             # get namespace from instance if not specified from URI
@@ -1593,7 +1760,10 @@ class LocalLookupFile(Lookup):
         if self.csv_field_size_limit:
             csv.field_size_limit(self.csv_field_size_limit)
         with self.file.open("r") as file:
-            return list(csv.DictReader(file))
+            reader = csv.DictReader(file)
+            rows = list(reader)
+            self.fieldnames = reader.fieldnames
+            return rows
 
     def read_from_excel_file(self) -> list[dict[str, Any]]:
         return pd.read_excel(self.file)
@@ -1602,9 +1772,9 @@ class LocalLookupFile(Lookup):
         with self.file.open("r") as file:
             return json.load(file)
 
-    def write(self, data: list[dict[str, Any]]):
+    def write(self, data: list[dict[str, Any]], fieldnames: Optional[list[str]] = None):
         if self.file_type == FileType.CSV:
-            self.write_to_csv_file(data)
+            self.write_to_csv_file(data, fieldnames)
         elif self.file_type == FileType.XLSX:
             self.write_to_excel_file(data)
         elif self.file_type == FileType.JSON:
@@ -1617,9 +1787,12 @@ class LocalLookupFile(Lookup):
                 param_hint="LocalLookupFile",
             )
 
-    def write_to_csv_file(self, data: list[list[str]]):
+    def write_to_csv_file(
+        self, data: list[dict[str, Any]], fieldnames: Optional[list[str]] = None
+    ):
+        headers = csv_headers(data, fieldnames)
         with self.file.open("w") as file:
-            writer = csv.DictWriter(file, fieldnames=list(data[0].keys()))
+            writer = csv.DictWriter(file, fieldnames=headers)
             writer.writeheader()
             writer.writerows(data)
 

@@ -55,3 +55,82 @@ def test_remove_dummy_alerts_lookup_csv():
         ],
     )
     assert "ok" in result.output
+
+
+def test_create_kvstore_collection():
+    result = runner.invoke(
+        app,
+        [
+            "lookups",
+            "mkkv",
+            "s://local//search/test_spc_kvstore",
+            "--from-file",
+            (tests_data / "test_dummy_alerts.csv").as_posix(),
+            "--field",
+            "count:number",
+            "--accelerated-field",
+            "by_count=count",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert "Error" not in result.output, result.output
+
+
+def test_create_existing_kvstore_collection_fails():
+    result = runner.invoke(
+        app,
+        ["lookups", "mkkv", "s://local//search/test_spc_kvstore", "-f", "user"],
+    )
+    assert result.exit_code == 1, result.output
+    assert "already exists" in result.output
+
+
+def test_list_kvstore_collection_is_present():
+    result = runner.invoke(
+        app,
+        [
+            "lookups",
+            "ls",
+            "--instance",
+            "local",
+            "--kv",
+            "--search",
+            "name=test_spc_kvstore",
+        ],
+    )
+    assert "test_spc_kvstore" in result.output
+
+
+def test_kvstore_lookup_definition_is_present():
+    from splunk_power_client.settings import Settings
+
+    instance = Settings(name="local").instance
+    instance.login()
+    definition = instance.service.confs["transforms"]["test_spc_kvstore"]
+    assert definition.content["external_type"] == "kvstore"
+    assert definition.content["collection"] == "test_spc_kvstore"
+
+
+def test_rm_kv_deletes_collection_and_definition():
+    result = runner.invoke(
+        app,
+        [
+            "lookups",
+            "rm",
+            "--instance",
+            "local",
+            "--kv",
+            "--search",
+            "name=test_spc_kvstore",
+            "--force",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert "test_spc_kvstore" in result.output
+
+    from splunk_power_client.settings import Settings
+
+    instance = Settings(name="local").instance
+    instance.login()
+    assert "test_spc_kvstore" not in instance.service.kvstore
+    assert "test_spc_kvstore" not in instance.service.confs["transforms"]

@@ -1,6 +1,7 @@
 from pathlib import Path
-from typing import Annotated, Optional
+from typing import TYPE_CHECKING, Annotated, Optional
 
+import pandas as pd
 import typer
 from rich import box
 from rich.console import Console
@@ -10,6 +11,7 @@ from ..models import (
     CopyObject,
     CopyStatusEnum,
     FileType,
+    KvStoreFieldType,
     LocalLookupFile,
     SplunkInstance,
     SplunkInstanceLookupCSV,
@@ -17,6 +19,9 @@ from ..models import (
 )
 from ..table_views import ScrollingTableConfig, ScrollingTableView
 from ..utils import get_instance_from_settings, remote_parse_uri
+
+if TYPE_CHECKING:
+    from ..kvstore_apply import Plan
 
 app = typer.Typer(no_args_is_help=True)
 
@@ -317,7 +322,8 @@ def cp(
                     if isinstance(obj.dst, SplunkInstanceLookupKvStore):
                         obj.dst.write(source_data, append=kv_append)
                     else:
-                        obj.dst.write(source_data)
+                        # header of the source, for header-only CSV lookups
+                        obj.dst.write(source_data, fieldnames=obj.src.fieldnames)
                     obj.status = CopyStatusEnum.DONE
                 except Exception as error:
                     obj.status = CopyStatusEnum.FAILED
@@ -423,7 +429,16 @@ def rm(
         Optional[bool],
         typer.Option(help="Force deletion without confirmation", show_default=False),
     ] = None,
+    data_only: Annotated[
+        bool,
+        typer.Option(
+            help="With --kv: only delete the data, keep the collection "
+            + "and its lookup definitions.",
+        ),
+    ] = False,
 ):
+    if data_only and not kv:
+        raise typer.BadParameter("--data-only requires --kv", param_hint="--data-only")
     try:
         # TODO: rendre le table dynamique, le tableau s'affiche à la toute fin
 
@@ -448,14 +463,32 @@ def rm(
                 + f"/{lookup.get_namespace().owner}"
                 + f"/{lookup.get_namespace().app}"
                 + f"/{lookup.name}?"
+                + (
+                    (
+                        " (data only)"
+                        if data_only
+                        else " (collection and lookup definitions)"
+                    )
+                    if kv
+                    else ""
+                )
             ):
-                lookup.delete()
+                if kv and not data_only:
+                    definitions = lookup.drop()
+                    status = "[green]OK[/green]" + (
+                        f" (+ {', '.join(definitions)})" if definitions else ""
+                    )
+                else:
+                    lookup.delete()
+                    status = "[green]OK[/green]" + (" (data)" if kv else "")
+            else:
+                status = "[yellow]skipped[/yellow]"
             table.add_row(
                 lookup.get_instance_name(),
                 lookup.get_namespace().owner,
                 lookup.get_namespace().app,
                 lookup.name,
-                "[green]OK[/green]",
+                status,
             )
 
         console.print(table)
@@ -463,3 +496,337 @@ def rm(
     except Exception as e:
         console.print(f"[red]Error: {e}[/red]")
         return typer.Exit(code=1)
+
+
+def parse_kv_fields(fields: list[str]) -> dict[str, KvStoreFieldType]:
+    """Parse `name[:type]` options into a fields dict, type defaults to string."""
+    parsed: dict[str, KvStoreFieldType] = {}
+    for field in fields:
+        name, _, field_type = field.partition(":")
+        if not name:
+            raise typer.BadParameter(f"Invalid field '{field}'", param_hint="--field")
+        try:
+            parsed[name] = KvStoreFieldType(field_type or KvStoreFieldType.STRING)
+        except ValueError:
+            raise typer.BadParameter(
+                f"Invalid type '{field_type}' for field '{name}', "
+                + f"expected one of: {', '.join(KvStoreFieldType)}",
+                param_hint="--field",
+            )
+    return parsed
+
+
+def parse_kv_accelerated_fields(
+    accelerated_fields: list[str],
+) -> dict[str, dict[str, int]]:
+    """Parse `name=field1,field2` options into an accelerated_fields dict."""
+    parsed: dict[str, dict[str, int]] = {}
+    for accelerated_field in accelerated_fields:
+        name, _, fields = accelerated_field.partition("=")
+        if not name or not fields:
+            raise typer.BadParameter(
+                f"Invalid accelerated field '{accelerated_field}', "
+                + "expected NAME=FIELD1,FIELD2",
+                param_hint="--accelerated-field",
+            )
+        parsed[name] = {field.strip(): 1 for field in fields.split(",")}
+    return parsed
+
+
+@app.command(
+    no_args_is_help=True,
+    help="Create a KVStore collection and its lookup definition.",
+)
+def mkkv(
+    target: Annotated[
+        str,
+        typer.Argument(show_default=False, help="<RemotePath>"),
+    ],
+    field: Annotated[
+        Optional[list[str]],
+        typer.Option(
+            "--field",
+            "-f",
+            help="Field as NAME[:TYPE] (string, number, bool, time, array). "
+            + "Repeat for each field.",
+            show_default=False,
+        ),
+    ] = None,
+    from_file: Annotated[
+        Optional[Path],
+        typer.Option(
+            help="Use the columns of a local lookup file as string fields.",
+            show_default=False,
+        ),
+    ] = None,
+    accelerated_field: Annotated[
+        Optional[list[str]],
+        typer.Option(
+            "--accelerated-field",
+            help="Acceleration as NAME=FIELD1,FIELD2. Repeat for each acceleration.",
+            show_default=False,
+        ),
+    ] = None,
+    enforce_types: Annotated[
+        bool,
+        typer.Option(help="Reject documents that do not match field types."),
+    ] = False,
+    replicate: Annotated[
+        bool,
+        typer.Option(help="Replicate the collection to indexers."),
+    ] = False,
+    definition: Annotated[
+        bool,
+        typer.Option(help="Create the lookup definition (transforms.conf)."),
+    ] = True,
+    definition_name: Annotated[
+        Optional[str],
+        typer.Option(
+            help="Lookup definition name. Defaults to the collection name.",
+            show_default=False,
+        ),
+    ] = None,
+    collection_template: Annotated[
+        Optional[str],
+        typer.Option(
+            "--collection",
+            "-c",
+            help="Collection YAML template: name in <templates-dir>/collections/ "
+            + "or path. Created or updated (idempotent).",
+            show_default=False,
+            rich_help_panel="Templates (as code)",
+        ),
+    ] = None,
+    definition_template: Annotated[
+        Optional[str],
+        typer.Option(
+            "--definition",
+            "-d",
+            help="Lookup definition YAML template: name in "
+            + "<templates-dir>/definitions/ or path. Created or updated (idempotent).",
+            show_default=False,
+            rich_help_panel="Templates (as code)",
+        ),
+    ] = None,
+    templates_dir: Annotated[
+        Path,
+        typer.Option(
+            envvar="SPC_TEMPLATES_DIR",
+            help="Directory holding collections/ and definitions/ templates.",
+            rich_help_panel="Templates (as code)",
+        ),
+    ] = Path("~/.spc/templates"),
+    dry_run: Annotated[
+        bool,
+        typer.Option(
+            help="Show the changes against Splunk without applying them.",
+            rich_help_panel="Templates (as code)",
+        ),
+    ] = False,
+):
+    if collection_template or definition_template:
+        legacy = {
+            "--field": field,
+            "--from-file": from_file,
+            "--accelerated-field": accelerated_field,
+            "--definition-name": definition_name,
+        }
+        used = [option for option, value in legacy.items() if value]
+        if used:
+            raise typer.BadParameter(
+                f"{', '.join(used)} cannot be combined with templates",
+                param_hint="--collection / --definition",
+            )
+        return mkkv_from_templates(
+            target=target,
+            collection_template=collection_template,
+            definition_template=definition_template,
+            templates_dir=templates_dir.expanduser(),
+            dry_run=dry_run,
+        )
+
+    try:
+        instance, collection_name = remote_parse_uri(uri=target)
+        if not collection_name:
+            raise typer.BadParameter(
+                "The target must contain a collection name", param_hint="TARGET"
+            )
+
+        fields: dict[str, KvStoreFieldType] = {}
+        if from_file:
+            rows = LocalLookupFile(name=from_file.as_posix()).read()
+            # xlsx files are read as a DataFrame
+            columns = rows.columns if isinstance(rows, pd.DataFrame) else rows[0]
+            fields.update({column: KvStoreFieldType.STRING for column in columns})
+        fields.update(parse_kv_fields(field or []))
+        fields.pop("_key", None)
+        if not fields:
+            raise typer.BadParameter(
+                "At least one field is required", param_hint="--field / --from-file"
+            )
+
+        instance.login()
+        lookup = instance.create_kvstore_collection(
+            name=collection_name,
+            fields=fields,
+            accelerated_fields=parse_kv_accelerated_fields(accelerated_field or []),
+            enforce_types=enforce_types,
+            replicate=replicate,
+            definition_name=(definition_name or collection_name)
+            if definition
+            else None,
+        )
+
+        table = Table(box=box.SIMPLE, title=f"KVStore '{lookup.name}' created")
+        table.add_column("Instance", justify="center")
+        table.add_column("Owner", justify="center")
+        table.add_column("App")
+        table.add_column("Field")
+        table.add_column("Type")
+        for field_name, field_type in lookup.config.fields.items():
+            table.add_row(
+                lookup.get_instance_name(),
+                lookup.get_namespace().owner,
+                lookup.get_namespace().app,
+                field_name,
+                str(field_type),
+            )
+        console.print(table)
+        if definition:
+            console.print(
+                f"Lookup definition: [green]{definition_name or collection_name}[/green]"
+            )
+
+    except typer.BadParameter:
+        raise
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
+        raise typer.Exit(code=1)
+
+
+def _uri_app(target: str) -> Optional[str]:
+    """App explicitly given in the URI (s://inst/owner/app), None otherwise."""
+    from urllib.parse import urlparse
+
+    segments = urlparse(target).path[1:].split("/")
+    return segments[1] or None if len(segments) >= 2 else None
+
+
+def _print_plan(plan: "Plan") -> None:
+    from ..kvstore_apply import Action
+
+    state = "update" if plan.exists else "create"
+    table = Table(
+        box=box.SIMPLE,
+        title=f"{plan.kind} '{plan.name}' (app {plan.app}) : {state}",
+        title_justify="left",
+    )
+    table.add_column("Key")
+    table.add_column("Current")
+    table.add_column("Desired")
+    table.add_column("Action")
+    colors = {Action.ADD: "green", Action.UPDATE: "yellow", Action.DRIFT: "red"}
+    for change in plan.changes:
+        table.add_row(
+            change.key,
+            change.current or "",
+            change.desired or "",
+            f"[{colors[change.action]}]{change.action}[/]",
+        )
+    if plan.acl_to_apply:
+        table.add_row(
+            "sharing", plan.current_sharing or "", plan.sharing, "[yellow]acl[/]"
+        )
+    if table.row_count:
+        console.print(table)
+    else:
+        console.print(f"{plan.kind} '{plan.name}' (app {plan.app}) : up to date")
+
+
+def mkkv_from_templates(
+    target: str,
+    collection_template: Optional[str],
+    definition_template: Optional[str],
+    templates_dir: Path,
+    dry_run: bool,
+) -> None:
+    from pydantic import ValidationError
+
+    from ..kvstore_apply import apply_plan, plan_collection, plan_definition
+    from ..kvstore_templates import (
+        CollectionTemplate,
+        DefinitionTemplate,
+        resolve_template,
+    )
+
+    try:
+        collection = definition = None
+        if collection_template:
+            path = resolve_template(collection_template, "collections", templates_dir)
+            collection = CollectionTemplate.from_yaml(path)
+        if definition_template:
+            path = resolve_template(definition_template, "definitions", templates_dir)
+            definition = DefinitionTemplate.from_yaml(path)
+            if collection is None:
+                # same-name collection template, used for fields_list and checks
+                path = (
+                    templates_dir / "collections" / f"{definition.collection_name}.yaml"
+                )
+                if path.exists():
+                    collection = CollectionTemplate.from_yaml(path)
+                    console.print(f"Using collection template {path}")
+            elif definition.collection_name != collection.name:
+                raise ValueError(
+                    f"Definition '{definition.name}' targets collection "
+                    + f"'{definition.collection_name}', not '{collection.name}'"
+                )
+    except FileNotFoundError as e:
+        console.print(f"[red]Template not found: {e.filename}[/red]")
+        raise typer.Exit(code=1)
+    except (ValidationError, ValueError) as e:
+        console.print(f"[red]Invalid template: {e}[/red]")
+        raise typer.Exit(code=1)
+
+    try:
+        instance, name = remote_parse_uri(uri=target)
+        expected = {t.name for t in (collection, definition) if t}
+        if name and name not in expected:
+            raise typer.BadParameter(
+                f"'{name}' does not match the template names: {', '.join(expected)}",
+                param_hint="TARGET",
+            )
+        uri_app = _uri_app(target)
+        for template in (collection, definition):
+            if template and template.app and uri_app and template.app != uri_app:
+                raise typer.BadParameter(
+                    f"Template '{template.name}' is for app '{template.app}', "
+                    + f"not '{uri_app}'",
+                    param_hint="TARGET",
+                )
+
+        instance.login()
+        service = instance.service
+        app_name = instance.namespace.app
+        plans = []
+        if collection_template:
+            plans.append(plan_collection(service, collection, app_name))
+        if definition:
+            plans.append(plan_definition(service, definition, app_name, collection))
+
+        console.print(f"Instance: [bold]{instance.name}[/bold]")
+        for plan in plans:
+            _print_plan(plan)
+
+        if dry_run:
+            console.print("[yellow]Dry run: nothing applied[/yellow]")
+            return
+        for plan in plans:
+            if plan.has_changes:
+                apply_plan(service, plan)
+                console.print(f"[green]{plan.kind} '{plan.name}' applied[/green]")
+
+    except typer.BadParameter:
+        raise
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
+        raise typer.Exit(code=1)

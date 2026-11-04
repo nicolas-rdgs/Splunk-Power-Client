@@ -1,0 +1,38 @@
+# KVStore collection template -> collections.conf
+# REST: POST storage/collections/config (create) / storage/collections/config/<name> (update)
+# Validated by splunk_power_client.kvstore_templates.CollectionTemplate (unknown keys rejected).
+# Allowed values: Splunk 10.0 collections.conf.spec.
+
+template_version: 1          # required value: 1
+
+# --- Identity ---------------------------------------------------------------
+name: my_collection          # REQUIRED. [A-Za-z0-9_][A-Za-z0-9_.-]*
+app: my_app                  # optional, else taken from the target URI
+sharing: global              # optional: user | app | global
+
+# --- Collection options (all optional, Splunk defaults shown) ----------------
+enforceTypes: false          # bool. true: an insert with a wrong type fails;
+                             #       false: only the invalid field is dropped
+replicate: false             # bool. Replicate the collection to indexers
+                             #       (needed for lookups run on indexers)
+replication_dump_strategy: auto          # auto | one_file
+replication_dump_maximum_file_size: 10240  # int >= 0, KB per dump file (strategy auto)
+profilingEnabled: false      # bool. Log slow operations
+profilingThresholdMs: 1000   # int >= 0, ms. 0 = log everything
+
+# --- Fields (REQUIRED, at least one) -----------------------------------------
+# field.<name> = number | bool | string | time
+# _key is managed by Splunk: do not declare it.
+fields:
+  host: string
+  ip: string
+  score: number
+  is_vip: bool
+  last_seen: time
+
+# --- Accelerations (optional) ------------------------------------------------
+# accelerated_fields.<name> = JSON index: {field: 1 (asc) | -1 (desc)}
+# Fields must be declared above. _key is always accelerated.
+accelerated_fields:
+  by_host: { host: 1 }
+  by_host_last_seen: { host: 1, last_seen: -1 }
