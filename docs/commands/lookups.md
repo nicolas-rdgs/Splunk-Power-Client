@@ -109,7 +109,8 @@ spc lookups mkkv s://prod//my_app -c assets -d assets
 ```
 
 - `-c` / `-d` take a template name (resolved in `collections/` / `definitions/`) or a path to a `.yaml` file.
-- Only the changed keys are sent on update. Keys present on Splunk but absent from the template (fields, accelerations) are reported as `drift (kept)` and never removed.
+- Collections: only the changed keys are sent on update. Keys present on Splunk but absent from the template (fields, accelerations) are reported as `drift (kept)` and never removed.
+- Definitions: the template is the full desired state. Splunk rewrites the `transforms.conf` stanza on update, so the whole template is sent and a key set on Splunk but absent from the template is removed.
 - `sharing` in a template is applied through the object ACL, keeping its current owner.
 - With `-d` alone, a collection template with the same name is used, if present, for `fields_list` and consistency checks.
 

@@ -124,3 +124,35 @@ def test_update_collection_sends_only_changes_and_reports_drift():
     }
     assert acl_path.endswith("/acl")
     assert acl == {"body": {"sharing": "global", "owner": "bob"}}  # owner kept
+
+
+def test_update_definition_sends_the_whole_template():
+    # data/transforms/lookups/<name> rewrites the stanza: sending only the
+    # changed keys drops external_type / collection and breaks the lookup
+    current = {
+        "external_type": "kvstore",
+        "collection": "assets",
+        "fields_list": "_key, host",
+        "max_matches": "1",
+    }
+    service = FakeService(
+        {
+            "data/transforms/lookups/assets": (
+                current,
+                {"sharing": "app", "owner": "nobody"},
+            )
+        }
+    )
+    plan = plan_definition(
+        service, DefinitionTemplate(name="assets", max_matches=1), "my_app", collection
+    )
+    assert [c.key for c in plan.changes] == ["fields_list"]
+    apply_plan(service, plan)
+    (_, _, path, params) = service.posts[0]
+    assert path == "data/transforms/lookups/assets"
+    assert params == {
+        "external_type": "kvstore",
+        "collection": "assets",
+        "fields_list": "_key, host, score",
+        "max_matches": "1",
+    }

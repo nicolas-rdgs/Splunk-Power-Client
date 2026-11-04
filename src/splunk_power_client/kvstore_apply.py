@@ -3,10 +3,12 @@ Plan / apply KVStore templates on a Splunk instance through the REST API.
 
 - plan_*: read the current object (GET) and compute the changes, nothing is written
 - apply_plan: create (POST <endpoint>) or update (POST <endpoint>/<name>) the object,
-  then set its sharing (POST <endpoint>/<name>/acl)
+  then set its sharing (POST <endpoint>/<name>/acl). A collection update sends
+  the changed keys only, a definition update sends the whole template (the
+  transforms endpoint rewrites the stanza)
 
-Keys present on Splunk but absent from the template are reported as drift and
-never removed.
+Collection keys present on Splunk but absent from the template are reported as
+drift and never removed.
 """
 
 import json
@@ -188,7 +190,11 @@ def apply_plan(service, plan: Plan) -> None:
     if not plan.exists:
         service.post(plan.endpoint, name=plan.name, **plan.params)
     elif plan.to_apply:
-        service.post(f"{plan.endpoint}/{plan.name}", **plan.to_apply)
+        # data/transforms/lookups/<name> rewrites the whole stanza: a key that
+        # is not sent (external_type, collection...) is dropped and the stanza
+        # stops being a lookup, so a definition is always sent in full
+        params = plan.params if plan.endpoint == DEFINITIONS_ENDPOINT else plan.to_apply
+        service.post(f"{plan.endpoint}/{plan.name}", **params)
     if plan.acl_to_apply:
         # sent in the body: as keyword arguments, splunklib takes owner and
         # sharing as the URL namespace and the ACL endpoint answers 400
