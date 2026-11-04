@@ -8,7 +8,11 @@ This command lets you quickly:
 - delete specific lookup or multiples
 - create a KVStore collection with its lookup definition
 
-specifier que "rm" pour les kv, supprime uniquement les données pas le kvstore avec la conf
+/// admonition | Deleting a KVStore
+    type: warning
+
+`spc lookups rm --kv` deletes the matching collections (configuration and data) and the kvstore lookup definitions of their app pointing to them. Add `--data-only` to only empty the collections.
+///
 
 ## URI specific
 
@@ -85,6 +89,17 @@ spc lookups mkkv s://dev/nobody/my_app/assets -f host -f ip -f last_seen:time --
 # infer the schema from a local file, then load it
 spc lookups mkkv s://dev//my_app/assets --from-file assets.csv
 spc lookups cp assets.csv s://dev//my_app/assets --target-kv
+```
+
+## Delete a KVStore collection
+
+```sh
+# delete the collection (configuration and data) and the kvstore lookup
+# definitions of its app pointing to it
+spc lookups rm --kv --search "name=assets"
+
+# only empty the collection, keep its configuration and definitions
+spc lookups rm --kv --data-only --search "name=assets"
 ```
 
 ## KVStore as code (YAML templates)

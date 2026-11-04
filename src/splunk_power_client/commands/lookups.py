@@ -429,7 +429,16 @@ def rm(
         Optional[bool],
         typer.Option(help="Force deletion without confirmation", show_default=False),
     ] = None,
+    data_only: Annotated[
+        bool,
+        typer.Option(
+            help="With --kv: only delete the data, keep the collection "
+            + "and its lookup definitions.",
+        ),
+    ] = False,
 ):
+    if data_only and not kv:
+        raise typer.BadParameter("--data-only requires --kv", param_hint="--data-only")
     try:
         # TODO: rendre le table dynamique, le tableau s'affiche à la toute fin
 
@@ -454,14 +463,32 @@ def rm(
                 + f"/{lookup.get_namespace().owner}"
                 + f"/{lookup.get_namespace().app}"
                 + f"/{lookup.name}?"
+                + (
+                    (
+                        " (data only)"
+                        if data_only
+                        else " (collection and lookup definitions)"
+                    )
+                    if kv
+                    else ""
+                )
             ):
-                lookup.delete()
+                if kv and not data_only:
+                    definitions = lookup.drop()
+                    status = "[green]OK[/green]" + (
+                        f" (+ {', '.join(definitions)})" if definitions else ""
+                    )
+                else:
+                    lookup.delete()
+                    status = "[green]OK[/green]" + (" (data)" if kv else "")
+            else:
+                status = "[yellow]skipped[/yellow]"
             table.add_row(
                 lookup.get_instance_name(),
                 lookup.get_namespace().owner,
                 lookup.get_namespace().app,
                 lookup.name,
-                "[green]OK[/green]",
+                status,
             )
 
         console.print(table)

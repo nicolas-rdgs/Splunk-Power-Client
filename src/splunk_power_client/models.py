@@ -1624,6 +1624,38 @@ class SplunkInstanceLookupKvStore(Lookup):
         else:
             return self.collection.data.delete()
 
+    def drop(self) -> list[str]:
+        """
+        Delete the collection itself (configuration and data) and, first, the
+        kvstore lookup definitions of its app that point to it: a definition left
+        without its collection is a broken lookup.
+
+        Returns the names of the deleted lookup definitions.
+        """
+        service = self.instance.service
+        app = self.get_namespace().app
+        response = service.get(
+            f"/servicesNS/-/{app}/data/transforms/lookups",
+            output_mode="json",
+            count=0,
+            search=f"collection={self.name}",
+        )
+        definitions = []
+        for entry in json.load(response.body)["entry"]:
+            content, acl = entry["content"], entry["acl"]
+            if (
+                content.get("external_type") == "kvstore"
+                and content.get("collection") == self.name
+                and acl.get("app") == app
+            ):
+                service.delete(
+                    f"/servicesNS/{acl['owner']}/{app}"
+                    + f"/data/transforms/lookups/{entry['name']}"
+                )
+                definitions.append(entry["name"])
+        self.collection.delete()
+        return definitions
+
     def get_namespace(self) -> SplunkNameSpace:
         if self.namespace is None:
             # get namespace from instance if not specified from URI

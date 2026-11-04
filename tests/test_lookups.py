@@ -110,6 +110,27 @@ def test_kvstore_lookup_definition_is_present():
     assert definition.content["external_type"] == "kvstore"
     assert definition.content["collection"] == "test_spc_kvstore"
 
-    # cleanup: `lookups rm --kv` only deletes data, not the collection
-    definition.delete()
-    instance.service.kvstore.delete("test_spc_kvstore")
+
+def test_rm_kv_deletes_collection_and_definition():
+    result = runner.invoke(
+        app,
+        [
+            "lookups",
+            "rm",
+            "--instance",
+            "local",
+            "--kv",
+            "--search",
+            "name=test_spc_kvstore",
+            "--force",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert "test_spc_kvstore" in result.output
+
+    from splunk_power_client.settings import Settings
+
+    instance = Settings(name="local").instance
+    instance.login()
+    assert "test_spc_kvstore" not in instance.service.kvstore
+    assert "test_spc_kvstore" not in instance.service.confs["transforms"]
